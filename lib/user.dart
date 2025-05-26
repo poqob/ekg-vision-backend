@@ -5,14 +5,20 @@ import 'dart:convert';
 class User {
   final String id;
   final String email;
+  final String username;
   final String passwordHash;
 
-  User({required this.id, required this.email, required this.passwordHash});
+  User(
+      {required this.id,
+      required this.email,
+      required this.username,
+      required this.passwordHash});
 
   Map<String, dynamic> toMap() {
     return {
       '_id': id,
       'email': email,
+      'username': username,
       'passwordHash': passwordHash,
     };
   }
@@ -21,6 +27,7 @@ class User {
     return User(
       id: map['_id'].toString(),
       email: map['email'],
+      username: map['username'],
       passwordHash: map['passwordHash'],
     );
   }
@@ -36,16 +43,32 @@ class UserRepository {
     return User.fromMap(userMap);
   }
 
-  Future<User> createUser(String email, String password) async {
+  Future<User?> findByUsername(String username) async {
+    final userMap = await users.findOne({'username': username});
+    if (userMap == null) return null;
+    return User.fromMap(userMap);
+  }
+
+  Future<User> createUser(
+      String email, String username, String password) async {
     final passwordHash = sha256.convert(utf8.encode(password)).toString();
     final user = User(
-        id: ObjectId().toHexString(), email: email, passwordHash: passwordHash);
+        id: ObjectId().toHexString(),
+        email: email,
+        username: username,
+        passwordHash: passwordHash);
     await users.insert(user.toMap());
     return user;
   }
 
-  Future<bool> validateUser(String email, String password) async {
-    final user = await findByEmail(email);
+  Future<bool> validateUser(
+      {String? email, String? username, required String password}) async {
+    User? user;
+    if (email != null) {
+      user = await findByEmail(email);
+    } else if (username != null) {
+      user = await findByUsername(username);
+    }
     if (user == null) return false;
     final passwordHash = sha256.convert(utf8.encode(password)).toString();
     return user.passwordHash == passwordHash;
