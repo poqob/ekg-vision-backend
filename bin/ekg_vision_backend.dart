@@ -47,25 +47,62 @@ Future<void> main(List<String> arguments) async {
       }
       final valid = await userRepository.validateUser(
           email: email, username: username, password: password);
-      if (!valid) {
+      final loginHistory = db.collection('login_history');
+      String? userId;
+      String? loginEmail = email;
+      String? loginUsername = username;
+      final ip = getRemoteIp(request);
+      final userAgent = request.headers['user-agent'];
+      if (valid) {
+        final user = email != null
+            ? await userRepository.findByEmail(email)
+            : await userRepository.findByUsername(username);
+        if (user == null) {
+          await loginHistory.insertOne({
+            'user_id': null,
+            'email': loginEmail,
+            'username': loginUsername,
+            'timestamp': DateTime.now().toUtc(),
+            'ip': ip,
+            'user_agent': userAgent,
+            'status': 'failure',
+            'reason': 'user_not_found',
+          });
+          return Response(401, body: 'User not found');
+        }
+        userId = user.id;
+        await loginHistory.insertOne({
+          'user_id': userId,
+          'email': user.email,
+          'username': user.username,
+          'timestamp': DateTime.now().toUtc(),
+          'ip': ip,
+          'user_agent': userAgent,
+          'status': 'success',
+        });
+        final jwt = JWT({
+          'id': user.id,
+          'email': user.email,
+          'username': user.username,
+          'profilePictureUrl': user.profilePictureUrl,
+        });
+        final token = jwt.sign(SecretKey('super_secret_key'),
+            expiresIn: Duration(hours: 24));
+        return Response.ok(jsonEncode({'token': token}),
+            headers: {'Content-Type': 'application/json'});
+      } else {
+        await loginHistory.insertOne({
+          'user_id': null,
+          'email': loginEmail,
+          'username': loginUsername,
+          'timestamp': DateTime.now().toUtc(),
+          'ip': ip,
+          'user_agent': userAgent,
+          'status': 'failure',
+          'reason': 'invalid_credentials',
+        });
         return Response(401, body: 'Invalid credentials');
       }
-      final user = email != null
-          ? await userRepository.findByEmail(email)
-          : await userRepository.findByUsername(username);
-      if (user == null) {
-        return Response(401, body: 'User not found');
-      }
-      final jwt = JWT({
-        'id': user.id,
-        'email': user.email,
-        'username': user.username,
-        'profilePictureUrl': user.profilePictureUrl,
-      });
-      final token = jwt.sign(SecretKey('super_secret_key'),
-          expiresIn: Duration(hours: 24));
-      return Response.ok(jsonEncode({'token': token}),
-          headers: {'Content-Type': 'application/json'});
     }
     if (request.url.path == 'update_profile' && request.method == 'POST') {
       final body = await request.readAsString();
@@ -267,9 +304,88 @@ Future<void> main(List<String> arguments) async {
         return Response(401, body: 'Invalid or expired token');
       }
     }
+    if (request.url.pathSegments.length == 2 &&
+        request.url.pathSegments[0] == 'patient' &&
+        request.method == 'GET') {
+      final patientId = request.url.pathSegments[1];
+      final authHeader = request.headers['authorization'];
+      if (authHeader == null || !authHeader.startsWith('Bearer ')) {
+        return Response(401, body: 'Missing or invalid Authorization header');
+      }
+      final token = authHeader.substring(7);
+      try {
+        JWT.verify(token, SecretKey('super_secret_key'));
+      } catch (e) {
+        return Response(401, body: 'Invalid or expired token');
+      }
+      final patientsCollection = db.collection('patients');
+      final patient = await patientsCollection
+          .findOne({'_id': ObjectId.tryParse(patientId) ?? patientId});
+      if (patient == null) {
+        return Response(404, body: 'Patient not found');
+      }
+      final map = Map<String, dynamic>.from(patient);
+      map['id'] = map['_id'].toString();
+      map.remove('_id');
+      return Response.ok(jsonEncode(map),
+          headers: {'Content-Type': 'application/json'});
+    }
+    if (request.url.path == 'login_history' && request.method == 'GET') {
+      final authHeader = request.headers['authorization'];
+      if (authHeader == null || !authHeader.startsWith('Bearer ')) {
+        return Response(401, body: 'Missing or invalid Authorization header');
+      }
+      final token = authHeader.substring(7);
+      try {
+        final jwt = JWT.verify(token, SecretKey('super_secret_key'));
+        String? userId = jwt.payload['id']?.toString();
+        if (userId == null || userId.isEmpty) {
+          final email = jwt.payload['email']?.toString();
+          if (email != null && email.isNotEmpty) {
+            final user = await userRepository.findByEmail(email);
+            userId = user?.id;
+          }
+        }
+        if (userId == null || userId.isEmpty) {
+          return Response(401, body: 'Invalid token payload');
+        }
+        final loginHistory = db.collection('login_history');
+        final history = await loginHistory
+            .find(where
+                .eq('user_id', userId)
+                .sortBy('timestamp', descending: true))
+            .toList();
+        final result = history.map((h) {
+          final map = Map<String, dynamic>.from(h);
+          map['id'] = map['_id'].toString();
+          map.remove('_id');
+          // Convert DateTime fields to ISO8601 string for JSON
+          map.updateAll((key, value) =>
+              value is DateTime ? value.toIso8601String() : value);
+          return map;
+        }).toList();
+        return Response.ok(jsonEncode(result),
+            headers: {'Content-Type': 'application/json'});
+      } catch (e) {
+        return Response(401, body: 'Invalid or expired token');
+      }
+    }
     return Response.notFound('Not Found');
   });
 
   final server = await io.serve(handler, 'localhost', 8080);
   print('Server listening on localhost:${server.port}');
+}
+
+// Helper to get remote IP address
+String? getRemoteIp(Request req) {
+  final forwarded = req.headers['x-forwarded-for'];
+  if (forwarded != null) return forwarded;
+  final connInfo = req.context['shelf.io.connection_info'];
+  if (connInfo != null &&
+      connInfo is Map &&
+      connInfo['remoteAddress'] != null) {
+    return connInfo['remoteAddress'].toString();
+  }
+  return null;
 }
