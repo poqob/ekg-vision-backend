@@ -6,7 +6,6 @@ import 'package:ekg_vision_backend/user.dart' as user_repo;
 import 'package:ekg_vision_backend/profile_picture_repository.dart';
 import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
 import 'package:mime/mime.dart';
-import 'dart:io';
 
 Future<void> main(List<String> arguments) async {
   final db = await Db.create('mongodb://localhost:27017/ekg_vision');
@@ -211,6 +210,60 @@ Future<void> main(List<String> arguments) async {
             }),
             headers: {'Content-Type': 'application/json'});
       } catch (e) {
+        return Response(401, body: 'Invalid or expired token');
+      }
+    }
+    if (request.url.path == 'patients' && request.method == 'GET') {
+      final patientsCollection = db.collection('patients');
+      final patients = await patientsCollection.find().toList();
+      // Remove MongoDB ObjectId from response
+      final result = patients.map((p) {
+        final map = Map<String, dynamic>.from(p);
+        map['id'] = map['_id'].toString();
+        map.remove('_id');
+        return map;
+      }).toList();
+      return Response.ok(jsonEncode(result),
+          headers: {'Content-Type': 'application/json'});
+    }
+    if (request.url.path == 'scan_results' && request.method == 'GET') {
+      final authHeader = request.headers['authorization'];
+      if (authHeader == null || !authHeader.startsWith('Bearer ')) {
+        return Response(401, body: 'Missing or invalid Authorization header');
+      }
+      final token = authHeader.substring(7);
+      try {
+        final jwt = JWT.verify(token, SecretKey('super_secret_key'));
+        // DEBUG: print payload for troubleshooting
+        print('JWT payload: ' + jwt.payload.toString());
+        String? userId = jwt.payload['id']?.toString();
+        if (userId == null || userId.isEmpty) {
+          final email = jwt.payload['email']?.toString();
+          if (email != null && email.isNotEmpty) {
+            final user = await userRepository.findByEmail(email);
+            userId = user?.id;
+          }
+        }
+        if (userId == null || userId.isEmpty) {
+          return Response(401, body: 'Invalid token payload');
+        }
+        final scanResultsCollection = db.collection('scan_results');
+        final results =
+            await scanResultsCollection.find({'user_id': userId}).toList();
+        final result = results.map((r) {
+          final map = Map<String, dynamic>.from(r);
+          map['id'] = map['_id'].toString();
+          map.remove('_id');
+          // Convert DateTime fields to ISO8601 string for JSON
+          map.updateAll((key, value) =>
+              value is DateTime ? value.toIso8601String() : value);
+          return map;
+        }).toList();
+        return Response.ok(jsonEncode(result),
+            headers: {'Content-Type': 'application/json'});
+      } catch (e, st) {
+        print('JWT error: ' + e.toString());
+        print(st);
         return Response(401, body: 'Invalid or expired token');
       }
     }
