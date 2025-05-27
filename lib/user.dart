@@ -7,12 +7,15 @@ class User {
   final String email;
   final String username;
   final String passwordHash;
+  final String? profilePictureUrl;
 
-  User(
-      {required this.id,
-      required this.email,
-      required this.username,
-      required this.passwordHash});
+  User({
+    required this.id,
+    required this.email,
+    required this.username,
+    required this.passwordHash,
+    this.profilePictureUrl,
+  });
 
   Map<String, dynamic> toMap() {
     return {
@@ -20,6 +23,7 @@ class User {
       'email': email,
       'username': username,
       'passwordHash': passwordHash,
+      'profilePictureUrl': profilePictureUrl,
     };
   }
 
@@ -29,6 +33,7 @@ class User {
       email: map['email'],
       username: map['username'],
       passwordHash: map['passwordHash'],
+      profilePictureUrl: map['profilePictureUrl'],
     );
   }
 }
@@ -49,16 +54,32 @@ class UserRepository {
     return User.fromMap(userMap);
   }
 
-  Future<User> createUser(
-      String email, String username, String password) async {
+  Future<User> createUser(String email, String username, String password,
+      {String? profilePictureUrl}) async {
     final passwordHash = sha256.convert(utf8.encode(password)).toString();
     final user = User(
         id: ObjectId().toHexString(),
         email: email,
         username: username,
-        passwordHash: passwordHash);
+        passwordHash: passwordHash,
+        profilePictureUrl: profilePictureUrl);
     await users.insert(user.toMap());
     return user;
+  }
+
+  Future<User> updateUser(String id,
+      {String? email, String? password, String? profilePictureUrl}) async {
+    final update = <String, dynamic>{};
+    if (email != null) update['email'] = email;
+    if (password != null) {
+      update['passwordHash'] = sha256.convert(utf8.encode(password)).toString();
+    }
+    if (profilePictureUrl != null) {
+      update['profilePictureUrl'] = profilePictureUrl;
+    }
+    await users.updateOne({'_id': id}, {r'$set': update});
+    final userMap = await users.findOne({'_id': id});
+    return User.fromMap(userMap!);
   }
 
   Future<bool> validateUser(
