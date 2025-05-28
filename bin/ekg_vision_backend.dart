@@ -272,7 +272,7 @@ Future<void> main(List<String> arguments) async {
       try {
         final jwt = JWT.verify(token, SecretKey('super_secret_key'));
         // DEBUG: print payload for troubleshooting
-        print('JWT payload: ' + jwt.payload.toString());
+        print('JWT payload: ${jwt.payload}');
         String? userId = jwt.payload['id']?.toString();
         if (userId == null || userId.isEmpty) {
           final email = jwt.payload['email']?.toString();
@@ -299,7 +299,7 @@ Future<void> main(List<String> arguments) async {
         return Response.ok(jsonEncode(result),
             headers: {'Content-Type': 'application/json'});
       } catch (e, st) {
-        print('JWT error: ' + e.toString());
+        print('JWT error: $e');
         print(st);
         return Response(401, body: 'Invalid or expired token');
       }
@@ -365,6 +365,58 @@ Future<void> main(List<String> arguments) async {
           return map;
         }).toList();
         return Response.ok(jsonEncode(result),
+            headers: {'Content-Type': 'application/json'});
+      } catch (e) {
+        return Response(401, body: 'Invalid or expired token');
+      }
+    }
+    if (request.url.path == 'change_credentials' && request.method == 'POST') {
+      final authHeader = request.headers['authorization'];
+      if (authHeader == null || !authHeader.startsWith('Bearer ')) {
+        return Response(401, body: 'Missing or invalid Authorization header');
+      }
+      final token = authHeader.substring(7);
+      try {
+        final jwt = JWT.verify(token, SecretKey('super_secret_key'));
+        String? userId = jwt.payload['id']?.toString();
+        if (userId == null || userId.isEmpty) {
+          final email = jwt.payload['email']?.toString();
+          if (email != null && email.isNotEmpty) {
+            final user = await userRepository.findByEmail(email);
+            userId = user?.id;
+          }
+        }
+        if (userId == null || userId.isEmpty) {
+          return Response(401, body: 'Invalid token payload');
+        }
+        final body = await request.readAsString();
+        final data = jsonDecode(body);
+        final newEmail = data['email'];
+        final newPassword = data['password'];
+        if (newEmail == null && newPassword == null) {
+          return Response(400,
+              body: 'At least one of email or password must be provided');
+        }
+        // Check if email is already taken by another user
+        if (newEmail != null) {
+          final existing = await userRepository.findByEmail(newEmail);
+          if (existing != null && existing.id != userId) {
+            return Response(409, body: 'Email already in use');
+          }
+        }
+        final updatedUser = await userRepository.updateUser(
+          userId,
+          email: newEmail,
+          password: newPassword,
+        );
+        return Response.ok(
+            jsonEncode({
+              'success': true,
+              'id': updatedUser.id,
+              'email': updatedUser.email,
+              'username': updatedUser.username,
+              'profilePictureUrl': updatedUser.profilePictureUrl,
+            }),
             headers: {'Content-Type': 'application/json'});
       } catch (e) {
         return Response(401, body: 'Invalid or expired token');
