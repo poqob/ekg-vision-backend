@@ -425,8 +425,8 @@ Future<void> main(List<String> arguments) async {
     return Response.notFound('Not Found');
   });
 
-  final server = await io.serve(handler, 'localhost', 8080);
-  print('Server listening on localhost:${server.port}');
+  final server = await io.serve(handler, '0.0.0.0', 8080);
+  print('Server listening on 0.0.0.0:${server.port}');
 }
 
 // Helper to get remote IP address
