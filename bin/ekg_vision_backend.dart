@@ -62,7 +62,7 @@ Future<void> main(List<String> arguments) async {
             'user_id': null,
             'email': loginEmail,
             'username': loginUsername,
-            'timestamp': DateTime.now().toUtc(),
+            'timestamp': getIstanbulTime(),
             'ip': ip,
             'user_agent': userAgent,
             'status': 'failure',
@@ -75,7 +75,7 @@ Future<void> main(List<String> arguments) async {
           'user_id': userId,
           'email': user.email,
           'username': user.username,
-          'timestamp': DateTime.now().toUtc(),
+          'timestamp': getIstanbulTime(),
           'ip': ip,
           'user_agent': userAgent,
           'status': 'success',
@@ -95,7 +95,7 @@ Future<void> main(List<String> arguments) async {
           'user_id': null,
           'email': loginEmail,
           'username': loginUsername,
-          'timestamp': DateTime.now().toUtc(),
+          'timestamp': getIstanbulTime(),
           'ip': ip,
           'user_agent': userAgent,
           'status': 'failure',
@@ -440,4 +440,10 @@ String? getRemoteIp(Request req) {
     return connInfo['remoteAddress'].toString();
   }
   return null;
+}
+
+// Helper to get Istanbul time (UTC+3)
+DateTime getIstanbulTime() {
+  final now = DateTime.now().toUtc();
+  return now.add(const Duration(hours: 3));
 }
